@@ -144,6 +144,53 @@ const makeTranslatedExpr = (tr, paramExprs) => {
     return `\${${p}}`;
   })}\``;
 };
+const singleCharEscapes = {
+  b: "\b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "	",
+  v: "\v",
+  "0": "\0"
+};
+const parseStringLiteral = (expr) => {
+  const source = expr.trim();
+  const quote = source[0];
+  if (quote !== '"' && quote !== "'" && quote !== "`")
+    throw new Error(`Not a string literal: ${expr}`);
+  let value = "";
+  let i = 1;
+  for (; i < source.length; i++) {
+    const char = source[i];
+    if (char === quote) break;
+    if (quote === "`" && char === "$" && source[i + 1] === "{")
+      throw new Error(`Not a static string literal: ${expr}`);
+    if (char !== "\\") {
+      value += char;
+      continue;
+    }
+    const escaped = source[++i];
+    if (escaped === void 0) break;
+    if (escaped === "x") {
+      value += String.fromCharCode(parseInt(source.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else if (escaped === "u" && source[i + 1] === "{") {
+      const end = source.indexOf("}", i);
+      if (end === -1) throw new Error(`Not a string literal: ${expr}`);
+      value += String.fromCodePoint(parseInt(source.slice(i + 2, end), 16));
+      i = end;
+    } else if (escaped === "u") {
+      value += String.fromCharCode(parseInt(source.slice(i + 1, i + 5), 16));
+      i += 4;
+    } else if (escaped === "\n") ;
+    else {
+      value += singleCharEscapes[escaped] ?? escaped;
+    }
+  }
+  if (i !== source.length - 1)
+    throw new Error(`Not a single string literal: ${expr}`);
+  return value;
+};
 const marker = "__$LOCALIZE$__(";
 const replaceGlobals = ({
   code,
@@ -212,7 +259,13 @@ const replaceGlobals = ({
     if (!argExprs.length) {
       throw new Error(`No arguments found for __$LOCALIZE$__`);
     }
-    const key = JSON.parse(argExprs.shift());
+    const keyExpr = argExprs.shift();
+    let key;
+    try {
+      key = parseStringLiteral(keyExpr);
+    } catch (error) {
+      throw new Error(`Invalid __$LOCALIZE$__ key: ${error.message}`);
+    }
     const tr = getTr(key, locale, translations);
     code = code.slice(0, startIndex) + makeTranslatedExpr(tr, argExprs) + chunk.slice(i + 1);
   }
@@ -220,6 +273,7 @@ const replaceGlobals = ({
 };
 export {
   makeTranslatedExpr,
+  parseStringLiteral,
   replaceGlobals,
   transformLocalize
 };

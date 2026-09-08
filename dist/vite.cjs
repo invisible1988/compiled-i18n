@@ -27,11 +27,18 @@ function i18nPlugin(options = {}) {
   let localesDirNode;
   let root = "";
   let scannedKeys;
-  let shouldInline = false;
+  let configIsSsr = false;
+  let configMode = "";
   let translations;
   let hasTabs;
   let allKeys;
   let pluralKeys;
+  const shouldInline = (ctx) => {
+    const envConfig = ctx.environment?.config;
+    if (envConfig?.consumer)
+      return envConfig.consumer === "client" && envConfig.mode === "production";
+    return !configIsSsr && configMode === "production";
+  };
   return [
     {
       name: "i18n",
@@ -53,7 +60,8 @@ function i18nPlugin(options = {}) {
         root = config.root;
         localesDirAbs = node_path.resolve(config.root, localesDir);
         localesDirNode = node_path.sep !== "/" ? localesDirAbs.replaceAll(node_path.sep, "/") : localesDirAbs;
-        shouldInline = !config.build.ssr && config.mode === "production";
+        configIsSsr = !!config.build.ssr;
+        configMode = config.mode;
         if (!assetsDir && config.plugins.some((p) => p.name === "vite-plugin-qwik"))
           assetsDir = "build/";
       },
@@ -124,6 +132,7 @@ function i18nPlugin(options = {}) {
       },
       // Load our virtual data files
       async load(id) {
+        const inline = shouldInline(this);
         if (id === "\0i18n-locales.js") {
           return `
 /**
@@ -132,7 +141,7 @@ function i18nPlugin(options = {}) {
  * For server builds, it contains all translations. For client builds, it is
  * empty, and translations need to be loaded dynamically.
  */
-${shouldInline ? `export default {"__$LOCALE$__": {translations: {}}}` : `
+${inline ? `export default {"__$LOCALE$__": {translations: {}}}` : `
 ${locales.map((l, i) => `import _${i} from '${localesDirNode}/${l}.json'`).join("\n")}
 
 export default {
@@ -159,9 +168,9 @@ import {localeNames} from '@i18n/__data.js'
 /** @type {Locale} */
 export let defaultLocale = ${JSON.stringify(defaultLocale)}
 /** @type {Locale} */
-export let currentLocale${shouldInline ? ' = "__$LOCALE$__"' : ""}
+export let currentLocale${inline ? ' = "__$LOCALE$__"' : ""}
 
-${shouldInline ? (
+${inline ? (
             // These functions shouldn't be called from client code
             `
 export let getLocale = () => "__$LOCALE$__"
@@ -198,7 +207,7 @@ export const setLocaleGetter = fn => {
         }
       },
       async transform(code, id) {
-        if (!shouldInline || !/\.(cjs|js|mjs|ts|jsx|tsx)($|\?)/.test(id))
+        if (!shouldInline(this) || !/\.(cjs|js|mjs|ts|jsx|tsx)($|\?)/.test(id))
           return null;
         return transformLocalize.transformLocalize({ id, code, allKeys, pluralKeys, babelPlugins });
       }
@@ -211,7 +220,7 @@ export const setLocaleGetter = fn => {
         // enforce isn't enough to make hooks be post, so we need to set the order
         order: "post",
         handler(_options, bundle) {
-          if (!shouldInline) return;
+          if (!shouldInline(this)) return;
           for (const [fileName, chunk] of Object.entries(bundle)) {
             if (assetsDir && !fileName.startsWith(assetsDir)) continue;
             for (const locale of locales) {
@@ -234,7 +243,7 @@ export const setLocaleGetter = fn => {
         }
       },
       buildEnd() {
-        if (!shouldInline) return;
+        if (!shouldInline(this)) return;
         let usedKeys = allKeys;
         if (usageGlobs?.length) {
           if (!scannedKeys) scannedKeys = scanUsage.scanUsageKeys(usageGlobs, root);
