@@ -153,6 +153,11 @@ const singleCharEscapes = {
   v: "\v",
   "0": "\0"
 };
+const parseHexDigits = (digits, expr, exactLength) => {
+  if (!digits || exactLength !== void 0 && digits.length !== exactLength || !/^[\da-fA-F]+$/.test(digits))
+    throw new Error(`Invalid escape sequence in ${expr}`);
+  return parseInt(digits, 16);
+};
 const parseStringLiteral = (expr) => {
   const source = expr.trim();
   const quote = source[0];
@@ -171,16 +176,26 @@ const parseStringLiteral = (expr) => {
     }
     const escaped = source[++i];
     if (escaped === void 0) break;
-    if (escaped === "x") {
-      value += String.fromCharCode(parseInt(source.slice(i + 1, i + 3), 16));
+    if (escaped >= "1" && escaped <= "7") {
+      throw new Error(`Legacy octal escape in ${expr}`);
+    } else if (escaped === "0" && source[i + 1] >= "0" && source[i + 1] <= "9") {
+      throw new Error(`Legacy octal escape in ${expr}`);
+    } else if (escaped === "x") {
+      value += String.fromCharCode(
+        parseHexDigits(source.slice(i + 1, i + 3), expr, 2)
+      );
       i += 2;
     } else if (escaped === "u" && source[i + 1] === "{") {
       const end = source.indexOf("}", i);
-      if (end === -1) throw new Error(`Not a string literal: ${expr}`);
-      value += String.fromCodePoint(parseInt(source.slice(i + 2, end), 16));
+      if (end === -1) throw new Error(`Invalid escape sequence in ${expr}`);
+      value += String.fromCodePoint(
+        parseHexDigits(source.slice(i + 2, end), expr)
+      );
       i = end;
     } else if (escaped === "u") {
-      value += String.fromCharCode(parseInt(source.slice(i + 1, i + 5), 16));
+      value += String.fromCharCode(
+        parseHexDigits(source.slice(i + 1, i + 5), expr, 4)
+      );
       i += 4;
     } else if (escaped === "\n") ;
     else {
@@ -264,7 +279,12 @@ const replaceGlobals = ({
     try {
       key = parseStringLiteral(keyExpr);
     } catch (error) {
-      throw new Error(`Invalid __$LOCALIZE$__ key: ${error.message}`);
+      throw new Error(
+        `Invalid __$LOCALIZE$__ key: ${error.message}`,
+        {
+          cause: error
+        }
+      );
     }
     const tr = getTr(key, locale, translations);
     code = code.slice(0, startIndex) + makeTranslatedExpr(tr, argExprs) + chunk.slice(i + 1);

@@ -27,8 +27,7 @@ function i18nPlugin(options = {}) {
   let localesDirNode;
   let root = "";
   let scannedKeys;
-  let configIsSsr = false;
-  let configMode = "";
+  let configSaysInline = false;
   let translations;
   let hasTabs;
   let allKeys;
@@ -37,7 +36,7 @@ function i18nPlugin(options = {}) {
     const envConfig = ctx.environment?.config;
     if (envConfig?.consumer)
       return envConfig.consumer === "client" && envConfig.mode === "production";
-    return !configIsSsr && configMode === "production";
+    return configSaysInline;
   };
   return [
     {
@@ -60,8 +59,7 @@ function i18nPlugin(options = {}) {
         root = config.root;
         localesDirAbs = node_path.resolve(config.root, localesDir);
         localesDirNode = node_path.sep !== "/" ? localesDirAbs.replaceAll(node_path.sep, "/") : localesDirAbs;
-        configIsSsr = !!config.build.ssr;
-        configMode = config.mode;
+        configSaysInline = !config.build.ssr && config.mode === "production";
         if (!assetsDir && config.plugins.some((p) => p.name === "vite-plugin-qwik"))
           assetsDir = "build/";
       },
